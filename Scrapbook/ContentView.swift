@@ -123,13 +123,33 @@ struct Post: Codable, Identifiable {
     }
 }
 
+protocol ImageCache {
+    subscript(_ url: URL) -> UIImage? { get set }
+}
+
+struct TemporaryImageCache: ImageCache {
+    private let cache = NSCache<NSURL, UIImage>()
+    
+    subscript(_ key: URL) -> UIImage? {
+        get { cache.object(forKey: key as NSURL) }
+        set { newValue == nil ? cache.removeObject(forKey: key as NSURL) : cache.setObject(newValue!, forKey: key as NSURL) }
+    }
+}
+
 class ImageLoader: ObservableObject {
     @Published var image: UIImage?
+    
+    private(set) var isLoading = false
+    
     private let url: URL
+    private var cache: ImageCache?
     private var cancellable: AnyCancellable?
     
-    init(url: URL) {
+    private static let imageProcessingQueue = DispatchQueue(label: "image-processing")
+    
+    init(url: URL, cache: ImageCache? = nil) {
         self.url = url
+        self.cache = cache
     }
     
     deinit {
@@ -137,9 +157,21 @@ class ImageLoader: ObservableObject {
     }
     
     func load() {
+        guard !isLoading else { return }
+
+        if let image = cache?[url] {
+            self.image = image
+            return
+        }
+        
         cancellable = URLSession.shared.dataTaskPublisher(for: url)
             .map { UIImage(data: $0.data) }
             .replaceError(with: nil)
+            .handleEvents(receiveSubscription: { [weak self] _ in self?.onStart() },
+                          receiveOutput: { [weak self] in self?.cache($0) },
+                          receiveCompletion: { [weak self] _ in self?.onFinish() },
+                          receiveCancel: { [weak self] in self?.onFinish() })
+            .subscribe(on: Self.imageProcessingQueue)
             .receive(on: DispatchQueue.main)
             .assign(to: \.image, on: self)
     }
@@ -147,17 +179,31 @@ class ImageLoader: ObservableObject {
     func cancel() {
         cancellable?.cancel()
     }
+    
+    private func onStart() {
+        isLoading = true
+    }
+    
+    private func onFinish() {
+        isLoading = false
+    }
+    
+    private func cache(_ image: UIImage?) {
+        image.map { cache?[url] = $0 }
+    }
 }
 
 struct AsyncImage<Placeholder: View>: View {
     @ObservedObject private var loader: ImageLoader
     private let placeholder: Placeholder?
-    
-    init(url: URL, placeholder: Placeholder? = nil) {
-        loader = ImageLoader(url: url)
+    private let configuration: (Image) -> Image
+
+    init(url: URL, cache: ImageCache? = nil, placeholder: Placeholder? = nil, configuration: @escaping (Image) -> Image = { $0 }) {
+        loader = ImageLoader(url: url, cache: cache)
         self.placeholder = placeholder
+        self.configuration = configuration
     }
-    
+
     var body: some View {
         image
             .onAppear(perform: loader.load)
@@ -167,9 +213,8 @@ struct AsyncImage<Placeholder: View>: View {
     @ViewBuilder
     private var image: some View {
         loader.image.map {
-            Image(uiImage: $0)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            configuration(Image(uiImage: $0).resizable())
+//                .aspectRatio(contentMode: .fit)
         }
         if loader.image == nil {
             placeholder
@@ -201,7 +246,9 @@ class FetchPosts: ObservableObject {
     }
 }
 
-struct Attachments: View {
+struct AttachmentsView: View {
+//    @Environment(\.imageCache) var cache: ImageCache
+
     let attachments: [Attachment]
     var images: [Attachment] {
         self.attachments.filter {
@@ -268,7 +315,7 @@ struct PostView: View {
             postHeader
             postBody
             postAttachments
-        }.fixedSize(horizontal: false, vertical: true)
+        }
     }
     
     @ViewBuilder
@@ -285,7 +332,7 @@ struct PostView: View {
     @ViewBuilder
     var postAttachments: some View {
         if post.attachments.count > 0 {
-            Attachments(attachments: post.attachments)
+            AttachmentsView(attachments: post.attachments)
         }
     }
 }
@@ -299,8 +346,8 @@ struct HomeFeed: View {
                 PostView(post: post)
             }
             .navigationBarTitle(Text("Scrapbook"))
-            .listStyle(GroupedListStyle())
-            .environment(\.horizontalSizeClass, .regular)
+//            .listStyle(GroupedListStyle())
+//            .environment(\.horizontalSizeClass, .regular)
         }
         .navigationViewStyle(StackNavigationViewStyle())
     }
