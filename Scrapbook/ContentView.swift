@@ -169,7 +169,7 @@ struct AsyncImage<Placeholder: View>: View {
         loader.image.map {
             Image(uiImage: $0)
                 .resizable()
-                // .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fit)
         }
         if loader.image == nil {
             placeholder
@@ -236,14 +236,15 @@ struct PostAuthorshipHeadingView: View {
     let user: User
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             AsyncImage(
                 url: user.avatarUrl,
-                placeholder: Text("…") // Circle().foregroundColor(Color.gray)
+                placeholder: Circle().foregroundColor(Color.gray)
             )
-            // .frame(width: 48, height: 48)
+            .frame(width: 48, height: 48, alignment: .center)
+            .mask(Circle())
             VStack(alignment: .leading) {
-                Text($0.username).fontWeight(.bold)
+                Text(user.username).fontWeight(.bold)
                 HStack(alignment: .firstTextBaseline) {
                     if post.timestamp != nil {
                         Text(formatDate(post.timestampDate ?? Date()))
@@ -254,6 +255,7 @@ struct PostAuthorshipHeadingView: View {
                 .font(.caption)
                 .foregroundColor(Color.gray)
             }
+            Spacer()
         }
     }
 }
@@ -264,7 +266,7 @@ struct PostView: View {
     var body: some View {
         VStack {
             postHeader
-            Text(post.text)
+            postBody
             postAttachments
         }.fixedSize(horizontal: false, vertical: true)
     }
@@ -275,9 +277,10 @@ struct PostView: View {
     }
     
 //    @ViewBuilder
-//    var postBody: some View {
-//
-//    }
+    var postBody: some View {
+        Text(post.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
     
     @ViewBuilder
     var postAttachments: some View {
