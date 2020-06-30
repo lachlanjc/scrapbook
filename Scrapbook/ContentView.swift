@@ -6,18 +6,63 @@
 //  Copyright © 2020 Lachlan Campbell. All rights reserved.
 //
 
-
 import SwiftUI
 import Combine
 import UIKit
 import Foundation
 
-struct User: Codable, Identifiable {
-    public var id: String
-    public var username: String
-    public var avatar: String
-    public var streakCount: Int
-    // css, slack, github, website
+extension Date {
+    
+    func isBefore(date : Date) -> Bool {
+        return self < date
+    }
+
+    func isAfter(date : Date) -> Bool {
+        return self > date
+    }
+
+    var secondsAgo : Double {
+        get {
+            return -(self.timeIntervalSinceNow)
+        }
+    }
+
+    var minutesAgo : Double {
+        get {
+            return (self.secondsAgo / 60)
+        }
+    }
+
+    var hoursAgo : Double {
+        get {
+            return (self.minutesAgo / 60)
+        }
+    }
+
+    var daysAgo : Double {
+        get {
+            return (self.hoursAgo / 24)
+        }
+    }
+
+    var weeksAgo : Double {
+        get {
+            return (self.daysAgo / 7)
+        }
+    }
+
+}
+
+func formatDate(_ dt: Date) -> String {
+    if dt.hoursAgo >= 24 {
+        let absoluteFormatter = DateFormatter()
+        absoluteFormatter.dateFormat = "MMM d"
+        return absoluteFormatter.string(from: Date().addingTimeInterval(-1000000))
+    } else {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: dt, relativeTo: Date())
+    }
 }
 
 struct Thumbnail: Codable, Identifiable {
@@ -45,19 +90,37 @@ struct Attachment: Codable, Identifiable {
     public var filename: String
     public var thumbnails: ThumbnailCollection?
     public var largeUrl: URL? {
-        guard let urlString = thumbnails?.large?.url else {
-            return nil
-        }
+        guard let urlString = thumbnails?.large?.url else { return nil }
         return URL(string: urlString)
+    }
+}
+
+struct User: Codable, Identifiable {
+    public var id: String
+    public var username: String
+    public var streakCount: Int
+    // css, slack, github, website
+    
+    public var avatar: String?
+    public var avatarUrl: URL {
+        guard let urlString = avatar,
+              let urlParsed = URL(string: urlString) else {
+            return URL(string: "https://hackclub.com/team/orpheus.jpg")!
+        }
+        return urlParsed
     }
 }
 
 struct Post: Codable, Identifiable {
     public var id: String
-    public var user: User?
+    public var user: User
     public var text: String
-    public var postedAt: Date?
     public var attachments: Array<Attachment>
+    
+    public var timestamp: String?
+    public var timestampDate: Date? {
+        return Date(timeIntervalSince1970: Double(self.timestamp ?? "0") ?? 0)
+    }
 }
 
 class ImageLoader: ObservableObject {
@@ -106,6 +169,7 @@ struct AsyncImage<Placeholder: View>: View {
         loader.image.map {
             Image(uiImage: $0)
                 .resizable()
+                // .aspectRatio(contentMode: .fit)
         }
         if loader.image == nil {
             placeholder
@@ -120,7 +184,7 @@ class FetchPosts: ObservableObject {
         let url = URL(string: "https://scrapbook.hackclub.com/api/posts/")!
         URLSession.shared.dataTask(with: url) { (data, res, error) in
             let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
+            decoder.dateDecodingStrategy = .secondsSince1970
             do {
                 if let postsData = data {
                     let decodedData = try decoder.decode([Post].self, from: postsData)
@@ -130,21 +194,12 @@ class FetchPosts: ObservableObject {
                 } else {
                     print("No data")
                 }
-            } catch { print("Error") }
+            } catch {
+                print("Error \(error)")
+            }
         }.resume()
     }
 }
-
-/*
- static let postedAtFormat: DateFormatter = {
- let formatter = DateFormatter()
- formatter.dateStyle = .short
- return formatter
- }()
- */
-/*
- Text("\(post.postedAt, formatter: Self.postedAtFormat)")
- */
 
 struct Attachments: View {
     let attachments: [Attachment]
@@ -155,7 +210,7 @@ struct Attachments: View {
     }
     // @Environment(\.imageCache) var cache: ImageCache
     
-    @ViewBuilder
+    // @ViewBuilder
     var body: some View {
         HStack(alignment: .top) {
             ForEach(images) { image in
@@ -164,10 +219,70 @@ struct Attachments: View {
                         AsyncImage(
                             url: $0,
                             placeholder: Text("Loading…").font(.caption)
-                        ).aspectRatio(contentMode: .fit)
+                        )
+                        /*
+                        .frame(width: UIScreen.main.bounds.width,
+                               height: UIScreen.main.bounds.height * 0.5,
+                               alignment: .center) */
                     }
                 }
             }
+        }
+    }
+}
+
+struct PostAuthorshipHeadingView: View {
+    let post: Post
+    let user: User
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(
+                url: user.avatarUrl,
+                placeholder: Text("…") // Circle().foregroundColor(Color.gray)
+            )
+            // .frame(width: 48, height: 48)
+            VStack(alignment: .leading) {
+                Text($0.username).fontWeight(.bold)
+                HStack(alignment: .firstTextBaseline) {
+                    if post.timestamp != nil {
+                        Text(formatDate(post.timestampDate ?? Date()))
+                    }
+                    Image(systemName: "paperclip")
+                    Text("\(post.attachments.count)")
+                }
+                .font(.caption)
+                .foregroundColor(Color.gray)
+            }
+        }
+    }
+}
+
+struct PostView: View {
+    let post: Post
+    
+    var body: some View {
+        VStack {
+            postHeader
+            Text(post.text)
+            postAttachments
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+    
+    @ViewBuilder
+    var postHeader: some View {
+        PostAuthorshipHeadingView(post: post, user: post.user)
+    }
+    
+//    @ViewBuilder
+//    var postBody: some View {
+//
+//    }
+    
+    @ViewBuilder
+    var postAttachments: some View {
+        if post.attachments.count > 0 {
+            Attachments(attachments: post.attachments)
         }
     }
 }
@@ -178,24 +293,7 @@ struct HomeFeed: View {
     var body: some View {
         return NavigationView {
             List(data.posts) { post in
-                VStack(alignment: .leading) {
-                    Text(post.text)
-                    HStack(alignment: .firstTextBaseline) {
-                        /*
- if post.postedAt != nil {
- Image(systemName: "calendar")
- Text(post.postedAt ?? "lol")
- }
- */
-                        Image(systemName: "paperclip")
-                        Text("\(post.attachments.count) attachment\(post.attachments.count != 1 ? "s" : "")")
-                    }
-                    .font(.caption)
-                    .foregroundColor(Color.gray)
-                    if (post.attachments.count > 0) {
-                        Attachments(attachments: post.attachments)
-                    }
-                }.fixedSize(horizontal: false, vertical: true)
+                PostView(post: post)
             }
             .navigationBarTitle(Text("Scrapbook"))
             .listStyle(GroupedListStyle())
