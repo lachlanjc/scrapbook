@@ -11,118 +11,6 @@ import Combine
 import UIKit
 import Foundation
 
-extension Date {
-    
-    func isBefore(date : Date) -> Bool {
-        return self < date
-    }
-
-    func isAfter(date : Date) -> Bool {
-        return self > date
-    }
-
-    var secondsAgo : Double {
-        get {
-            return -(self.timeIntervalSinceNow)
-        }
-    }
-
-    var minutesAgo : Double {
-        get {
-            return (self.secondsAgo / 60)
-        }
-    }
-
-    var hoursAgo : Double {
-        get {
-            return (self.minutesAgo / 60)
-        }
-    }
-
-    var daysAgo : Double {
-        get {
-            return (self.hoursAgo / 24)
-        }
-    }
-
-    var weeksAgo : Double {
-        get {
-            return (self.daysAgo / 7)
-        }
-    }
-
-}
-
-func formatDate(_ dt: Date) -> String {
-    if dt.hoursAgo >= 24 {
-        let absoluteFormatter = DateFormatter()
-        absoluteFormatter.dateFormat = "MMM d"
-        return absoluteFormatter.string(from: Date().addingTimeInterval(-1000000))
-    } else {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: dt, relativeTo: Date())
-    }
-}
-
-struct Thumbnail: Codable, Identifiable {
-    public var id: String {
-        return url
-    }
-    public var url: String
-    public var width: Int
-    public var height: Int
-}
-
-struct ThumbnailCollection: Codable, Identifiable {
-    public var id: String {
-        return "thumbnails-\(full?.url ?? UUID().uuidString)"
-    }
-    public var small: Thumbnail?
-    public var large: Thumbnail?
-    public var full: Thumbnail?
-}
-
-struct Attachment: Codable, Identifiable {
-    public var id: String
-    public var url: String
-    public var type: String
-    public var filename: String
-    public var thumbnails: ThumbnailCollection?
-    public var largeUrl: URL? {
-        guard let urlString = thumbnails?.large?.url else { return nil }
-        return URL(string: urlString)
-    }
-}
-
-struct User: Codable, Identifiable {
-    public var id: String
-    public var username: String
-    public var streakCount: Int
-    // css, slack, github, website
-    
-    public var avatar: String?
-    public var avatarUrl: URL {
-        guard let urlString = avatar,
-              let urlParsed = URL(string: urlString) else {
-            return URL(string: "https://hackclub.com/team/orpheus.jpg")!
-        }
-        return urlParsed
-    }
-}
-
-struct Post: Codable, Identifiable {
-    public var id: String
-    public var user: User
-    public var text: String
-    public var attachments: Array<Attachment>
-    
-    public var timestamp: String?
-    public var timestampDate: Date? {
-        return Date(timeIntervalSince1970: Double(self.timestamp ?? "0") ?? 0)
-    }
-}
-
 protocol ImageCache {
     subscript(_ url: URL) -> UIImage? { get set }
 }
@@ -222,30 +110,6 @@ struct AsyncImage<Placeholder: View>: View {
     }
 }
 
-class FetchPosts: ObservableObject {
-    @Published var posts = [Post]()
-    
-    init() {
-        let url = URL(string: "https://scrapbook.hackclub.com/api/posts/")!
-        URLSession.shared.dataTask(with: url) { (data, res, error) in
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .secondsSince1970
-            do {
-                if let postsData = data {
-                    let decodedData = try decoder.decode([Post].self, from: postsData)
-                    DispatchQueue.main.async {
-                        self.posts = decodedData
-                    }
-                } else {
-                    print("No data")
-                }
-            } catch {
-                print("Error \(error)")
-            }
-        }.resume()
-    }
-}
-
 struct AttachmentsView: View {
 //    @Environment(\.imageCache) var cache: ImageCache
 
@@ -294,7 +158,7 @@ struct PostAuthorshipHeadingView: View {
                 Text(user.username).fontWeight(.bold)
                 HStack(alignment: .firstTextBaseline) {
                     if post.timestamp != nil {
-                        Text(formatDate(post.timestampDate ?? Date()))
+                        Text(post.timestampDate?.scrapbookFormat ?? "")
                     }
                     Image(systemName: "paperclip")
                     Text("\(post.attachments.count)")
@@ -338,7 +202,7 @@ struct PostView: View {
 }
 
 struct HomeFeed: View {
-    @ObservedObject var data = FetchPosts()
+    @ObservedObject var data = ScrapbookDataService()
     
     var body: some View {
         return NavigationView {
